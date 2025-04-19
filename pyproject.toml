@@ -1,0 +1,28 @@
+[project]
+name = "pandas-cleaner"
+version = "0.1.0"
+description = "A high-performance interactive data cleaning tool with Streamlit UI and Rust integration capabilities"
+readme = "README.md"
+authors = [
+    { name = "SANTHOSH-SACHIN", email = "sandy42107@gmail.com" }
+]
+license = "MIT"
+keywords = ["pandas", "data-cleaning", "streamlit", "data-science", "rust"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3.9",
+    "Topic :: Scientific/Engineering :: Data Science",
+]
+requires-python = ">=3.9"
+dependencies = [
+    "numpy>=2.2.4",
+    "pandas>=2.2.3",
+    "streamlit>=1.44.1",
+]
+
+
+
+[project.scripts]
+pandas-cleaner = "pandas_cleaner.cli:main"
+
