@@ -1,7 +1,8 @@
 # 🧹 PandasCleaner
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python Version](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
+[![Python Version](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![Version](https://img.shields.io/badge/version-0.2.0-green.svg)](https://github.com/SANTHOSH-SACHIN/pandas-cleaner)
 
 A high-performance interactive data cleaning tool with a Streamlit UI that combines the power of Pandas with Rust for optimal performance. Clean your data with an intuitive interface while generating production-ready Python code.
 
@@ -22,11 +23,13 @@ A high-performance interactive data cleaning tool with a Streamlit UI that combi
   - Automatic session persistence using SQLite
   - Resume your work exactly where you left off
   - Multiple session support
+  - Improved state management between operations
 
 - 📝 Code Generation
   - Export your cleaning steps as production-ready Python code
   - Direct integration with existing data pipelines
   - Generated code follows best practices
+  - Proper state tracking for all operations
 
 ## 🚀 Quick Start
 
@@ -96,6 +99,46 @@ pandas-cleaner start --port 8000  # Use custom port
 - **Custom Value Imputation**: Fill missing values with domain-specific defaults
 - **Complex Queries**: Use the full power of Pandas query syntax
 - **Aggregation Functions**: Support for sum, mean, count, min, max, and more
+- **State Management**: Improved persistence between operations
+
+## 🔄 What's New in v0.2.0
+
+### Bug Fixes and Improvements
+1. Fixed issues with state management:
+   - Added proper session initialization check
+   - Added cleaning steps persistence between reruns
+   - Added file-based state management
+   - Fixed state reset issues
+
+2. Fixed Filter functionality:
+   - Added proper query validation
+   - Added error handling for invalid queries
+   - Fixed state management for filter operations
+   - Added empty result handling
+
+3. Fixed Group By operations:
+   - Improved handling of numeric columns
+   - Added proper aggregation dictionary creation
+   - Added warning for non-numeric columns
+   - Fixed state persistence for group operations
+
+4. Fixed Code Generation:
+   - Fixed cleaning steps tracking
+   - Added proper state checks
+   - Added proper string escaping
+   - Added reset functionality in generated code
+
+5. Improved Session Management:
+   - Added proper state persistence
+   - Added file change detection
+   - Added state backup and restore
+   - Added debug tracking
+
+6. Added Debug Information:
+   - Added state tracking throughout the application
+   - Added operation tracking
+   - Added clear feedback messages
+   - Added detailed error messages
 
 ## 🤝 Contributing
 
@@ -132,7 +175,7 @@ Join our community of contributors and help make data cleaning more efficient!
 
 ## 📋 Requirements
 
-- Python ≥ 3.13
+- Python ≥ 3.9
 - Core Dependencies (auto-installed):
   - streamlit ≥ 1.44.1
   - pandas ≥ 2.2.3

@@ -1,6 +1,6 @@
 [project]
 name = "pandas-cleaner"
-version = "0.1.0"
+version = "0.2.0"
 description = "A high-performance interactive data cleaning tool with Streamlit UI and Rust integration capabilities"
 readme = "README.md"
 authors = [
