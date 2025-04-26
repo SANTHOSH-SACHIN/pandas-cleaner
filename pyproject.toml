@@ -1,6 +1,6 @@
 [project]
 name = "pandas-cleaner"
-version = "0.2.0"
+version = "0.3.0"
 description = "A high-performance interactive data cleaning tool with Streamlit UI and Rust integration capabilities"
 readme = "README.md"
 authors = [
@@ -19,10 +19,12 @@ dependencies = [
     "numpy>=2.2.4",
     "pandas>=2.2.3",
     "streamlit>=1.44.1",
+    "openpyxl>=3.1.2",  # For Excel files
+    "pyarrow>=15.0.0",  # For Parquet files
+    "polars>=0.20.15",  # For faster data processing
 ]
 
 
 
 [project.scripts]
 pandas-cleaner = "pandas_cleaner.cli:main"
-

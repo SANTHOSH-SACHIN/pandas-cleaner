@@ -4,20 +4,23 @@
 [![Python Version](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![Version](https://img.shields.io/badge/version-0.2.0-green.svg)](https://github.com/SANTHOSH-SACHIN/pandas-cleaner)
 
-A high-performance interactive data cleaning tool with a Streamlit UI that combines the power of Pandas with Rust for optimal performance. Clean your data with an intuitive interface while generating production-ready Python code.
+A high-performance interactive data cleaning tool with a Streamlit UI that combines the power of Polars and Pandas for optimal performance. Clean your data from multiple formats (CSV, Excel, Parquet) with an intuitive interface while generating production-ready Python code. Choose between lightning-fast Polars operations or familiar Pandas syntax for your data cleaning needs.
 
 ## ✨ Features
 
 - 📊 Interactive DataFrame Visualization
-  - Upload and view CSV files in a responsive table interface
+  - Support for multiple file formats (CSV, Excel, Parquet)
+  - Upload and view data in a responsive table interface
   - Sort columns with a single click
   - Real-time data preview
 
-- 🧰 Comprehensive Data Cleaning Tools
+- 🧰 High-Performance Data Cleaning Tools
+  - Powered by Polars for lightning-fast data operations
+  - Fallback to Pandas for compatibility
   - Handle missing values intelligently (drop, fill with mean/median/mode, or custom value)
-  - Advanced filtering using Pandas query syntax
+  - Advanced filtering using Polars/Pandas query syntax
   - Flexible group by operations with various aggregation functions
-  - Future support for Rust-powered operations for enhanced performance
+  - Future support for Rust-powered operations for even better performance
 
 - 💾 Smart Session Management
   - Automatic session persistence using SQLite
@@ -64,24 +67,42 @@ pandas-cleaner start --port 8000  # Use custom port
 ### Data Cleaning Workflow
 
 1. 📤 **Upload Your Data**
-   - Use the sidebar file uploader to select your CSV file
+   - Use the sidebar file uploader to select your data file
+   - Supported formats: CSV, Excel (.xlsx, .xls), Parquet
    - Preview your data in the interactive table
+   - Automatic format detection and optimized loading
 
 2. 🧹 **Clean Your Data**
    - **Missing Values**
      ```python
-     # Example of generated code for handling missing values
-     df = df.fillna(df.mean(numeric_only=True))
+     # Using Polars (faster)
+     if use_polars:
+         df = df.drop_nulls()  # or
+         df = df.fill_null(df.mean())
+     # Using Pandas (compatible)
+     else:
+         df = df.dropna()  # or
+         df = df.fillna(df.mean())
      ```
    - **Filtering**
      ```python
-     # Example of filtering data
-     df = df.query("age > 25 and category == 'A'")
+     # Using Polars (faster)
+     if use_polars:
+         df = df.filter(pl.col("age") > 25 & pl.col("category") == "A")
+     # Using Pandas (compatible)
+     else:
+         df = df.query("age > 25 and category == 'A'")
      ```
    - **Aggregation**
      ```python
-     # Example of group by operation
-     df = df.groupby(['category']).agg('mean').reset_index()
+     # Using Polars (faster)
+     if use_polars:
+         df = (df.group_by("category")
+               .agg([pl.col("value").mean()])
+               .collect())
+     # Using Pandas (compatible)
+     else:
+         df = df.groupby(['category']).agg('mean').reset_index()
      ```
 
 3. 💻 **Export Your Work**
@@ -101,7 +122,21 @@ pandas-cleaner start --port 8000  # Use custom port
 - **Aggregation Functions**: Support for sum, mean, count, min, max, and more
 - **State Management**: Improved persistence between operations
 
-## 🔄 What's New in v0.2.0
+## 🔄 What's New in v0.3.0
+
+### Major Features
+1. Added Polars Integration:
+   - High-performance data operations using Polars
+   - Seamless fallback to Pandas when needed
+   - Generated code supports both Polars and Pandas syntax
+   - Optimized memory usage and processing speed
+
+2. Added Multi-Format Support:
+   - CSV file support with optimized loading
+   - Excel (.xlsx, .xls) file support
+   - Parquet file support
+   - Automatic format detection
+   - Smart memory management for large files
 
 ### Bug Fixes and Improvements
 1. Fixed issues with state management:
@@ -179,7 +214,10 @@ Join our community of contributors and help make data cleaning more efficient!
 - Core Dependencies (auto-installed):
   - streamlit ≥ 1.44.1
   - pandas ≥ 2.2.3
+  - polars ≥ 0.20.15
   - numpy ≥ 2.2.4
+  - openpyxl ≥ 3.1.2
+  - pyarrow ≥ 15.0.0
 
 ## 📝 License
 
@@ -188,12 +226,15 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 🙏 Acknowledgments
 
 - Built with [Streamlit](https://streamlit.io/)
-- Powered by [Pandas](https://pandas.pydata.org/)
+- High-performance operations by [Polars](https://www.pola.rs/)
+- Data analysis with [Pandas](https://pandas.pydata.org/)
 - Future optimizations with [Rust](https://www.rust-lang.org/)
 
 ## 🚀 Roadmap
 
 - [ ] Add Rust integration for faster data processing
 - [ ] Implement machine learning-based data cleaning suggestions
-- [ ] Add support for more file formats (Excel, Parquet, etc.)
+- [ ] Add support for more data formats (JSON, SQL, etc.)
 - [ ] Create a plugin system for custom cleaning operations
+- [ ] Add data visualization features
+- [ ] Implement automated data quality checks

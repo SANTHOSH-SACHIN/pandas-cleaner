@@ -1,10 +1,48 @@
 import streamlit as st
 import pandas as pd
+import polars as pl
 import sqlite3
 import json
 from datetime import datetime
 import os
-from typing import List, Dict, Any, Union, Optional
+from pathlib import Path
+from typing import List, Dict, Any, Union, Optional, Tuple
+
+# File type constants
+SUPPORTED_FILE_TYPES = {
+    "csv": "CSV",
+    "xlsx": "Excel",
+    "xls": "Excel",
+    "parquet": "Parquet"
+}
+
+def load_dataframe(uploaded_file) -> Tuple[pl.DataFrame, str]:
+    """Load a dataframe from various file formats using Polars."""
+    file_extension = Path(uploaded_file.name).suffix[1:].lower()
+
+    if file_extension not in SUPPORTED_FILE_TYPES:
+        raise ValueError(f"Unsupported file format: {file_extension}")
+
+    try:
+        if file_extension == "csv":
+            df = pl.read_csv(uploaded_file)
+        elif file_extension in ["xlsx", "xls"]:
+            # Convert Excel to pandas first, then to Polars
+            pandas_df = pd.read_excel(uploaded_file)
+            df = pl.from_pandas(pandas_df)
+        elif file_extension == "parquet":
+            df = pl.read_parquet(uploaded_file)
+        return df, file_extension
+    except Exception as e:
+        raise ValueError(f"Error loading {SUPPORTED_FILE_TYPES[file_extension]} file: {str(e)}")
+
+def polars_to_pandas(df: pl.DataFrame) -> pd.DataFrame:
+    """Convert Polars DataFrame to Pandas DataFrame for compatibility."""
+    return df.to_pandas()
+
+def pandas_to_polars(df: pd.DataFrame) -> pl.DataFrame:
+    """Convert Pandas DataFrame to Polars DataFrame."""
+    return pl.from_pandas(df)
 
 def init_session_state():
     """Initialize session state variables."""
@@ -64,66 +102,110 @@ def setup_database() -> sqlite3.Connection:
     conn.commit()
     return conn
 
-def handle_missing_values(df: pd.DataFrame, strategy: str, fill_value: Optional[Union[int, float, str]] = None) -> pd.DataFrame:
-    """Handle missing values in the DataFrame."""
+def handle_missing_values(df: pl.DataFrame, strategy: str, fill_value: Optional[Union[int, float, str]] = None) -> pl.DataFrame:
+    """Handle missing values in the DataFrame using Polars."""
     if strategy == 'drop':
-        return df.dropna()
+        return df.drop_nulls()
 
     if strategy == 'fill_value' and fill_value is not None:
-        return df.fillna(fill_value)
+        return df.fill_null(fill_value)
 
-    numeric_cols = df.select_dtypes(include=['int64', 'float64']).columns
-    non_numeric_cols = df.select_dtypes(exclude=['int64', 'float64']).columns
-
-    result_df = df.copy()
+    # Get numeric and non-numeric columns
+    numeric_dtypes = [pl.Float32, pl.Float64, pl.Int32, pl.Int64]
+    numeric_cols = [col for col in df.columns if df[col].dtype in numeric_dtypes]
+    non_numeric_cols = [col for col in df.columns if col not in numeric_cols]
 
     if strategy == 'fill_mean':
-        result_df[numeric_cols] = result_df[numeric_cols].fillna(result_df[numeric_cols].mean())
+        # Fill numeric columns with mean
+        for col in numeric_cols:
+            df = df.with_columns(pl.col(col).fill_null(pl.col(col).mean()))
     elif strategy == 'fill_median':
-        result_df[numeric_cols] = result_df[numeric_cols].fillna(result_df[numeric_cols].median())
+        # Fill numeric columns with median
+        for col in numeric_cols:
+            df = df.with_columns(pl.col(col).fill_null(pl.col(col).median()))
     elif strategy == 'fill_mode':
         # Handle numeric and non-numeric columns separately
         for col in numeric_cols:
-            result_df[col] = result_df[col].fillna(result_df[col].mode().iloc[0] if not result_df[col].mode().empty else 0)
+            mode_val = df.select(pl.col(col).mode().first()).item()
+            df = df.with_columns(pl.col(col).fill_null(mode_val if mode_val is not None else 0))
         for col in non_numeric_cols:
-            result_df[col] = result_df[col].fillna(result_df[col].mode().iloc[0] if not result_df[col].mode().empty else '')
+            mode_val = df.select(pl.col(col).mode().first()).item()
+            df = df.with_columns(pl.col(col).fill_null(mode_val if mode_val is not None else ''))
 
-    return result_df
+    return df
 
-def validate_query(df: pd.DataFrame, query: str) -> tuple[bool, str]:
-    """Validate a query string before applying it to the DataFrame."""
+def validate_and_apply_filter(df: pl.DataFrame, query: str) -> tuple[bool, str, Optional[pl.DataFrame]]:
+    """Validate and apply a filter query using Polars."""
     try:
         # Check if query is empty
         if not query.strip():
-            return False, "Query cannot be empty"
+            return False, "Query cannot be empty", None
 
-        # Try to execute the query on a copy of the DataFrame
-        test_df = df.copy()
-        test_df.query(query)
-        return True, ""
+        # Convert Pandas-style query to Polars expression
+        # Replace common pandas operations with Polars equivalents
+        query = query.replace('==', '=')  # Polars uses single = for equality
+
+        # Try to apply the filter
+        filtered_df = df.filter(pl.expr(query))
+
+        if filtered_df.height == 0:
+            return True, "Filter resulted in empty DataFrame", None
+
+        return True, "", filtered_df
     except Exception as e:
-        return False, str(e)
+        return False, str(e), None
 
-def apply_group_by(df: pd.DataFrame, group_cols: List[str], agg_func: str) -> pd.DataFrame:
-    """Apply groupby operation to the DataFrame."""
+def convert_data_types(df: pl.DataFrame, type_conversions: Dict[str, str]) -> pl.DataFrame:
+    """Convert data types of specified columns in the DataFrame using Polars."""
+    for column, target_type in type_conversions.items():
+        try:
+            if target_type == 'int':
+                df = df.with_columns(pl.col(column).cast(pl.Int64, strict=False))
+            elif target_type == 'float':
+                df = df.with_columns(pl.col(column).cast(pl.Float64, strict=False))
+            elif target_type == 'datetime':
+                df = df.with_columns(pl.col(column).str.strptime(pl.Datetime, strict=False))
+            elif target_type == 'string':
+                df = df.with_columns(pl.col(column).cast(pl.Utf8))
+            elif target_type == 'boolean':
+                df = df.with_columns(pl.col(column).cast(pl.Boolean))
+        except Exception as e:
+            st.error(f"Error converting column '{column}' to {target_type}: {str(e)}")
+            return df  # Return unchanged DataFrame on error
+
+    return df
+
+def apply_group_by(df: pl.DataFrame, group_cols: List[str], agg_func: str) -> pl.DataFrame:
+    """Apply groupby operation to the DataFrame using Polars."""
     if not group_cols:
         return df
 
     # Get numeric columns for aggregation
-    numeric_cols = df.select_dtypes(include=['int64', 'float64']).columns
+    numeric_dtypes = [pl.Float32, pl.Float64, pl.Int32, pl.Int64]
+    numeric_cols = [col for col in df.columns if df[col].dtype in numeric_dtypes and col not in group_cols]
 
-    # Filter out group columns from numeric columns
-    agg_cols = [col for col in numeric_cols if col not in group_cols]
-
-    if not agg_cols:
+    if not numeric_cols:
         st.warning("No numeric columns available for aggregation")
         return df
 
-    # Create aggregation dictionary
-    agg_dict = {col: agg_func for col in agg_cols}
-
     try:
-        return df.groupby(group_cols).agg(agg_dict).reset_index()
+        # Map pandas-style aggregation functions to Polars
+        agg_map = {
+            'mean': 'mean',
+            'sum': 'sum',
+            'count': 'count',
+            'min': 'min',
+            'max': 'max'
+        }
+
+        # Create aggregation expressions
+        agg_exprs = [
+            pl.col(col).agg_groups(agg_map[agg_func]).alias(col)
+            for col in numeric_cols
+        ]
+
+        # Apply group by with aggregation
+        return df.group_by(group_cols).agg(agg_exprs)
     except Exception as e:
         st.error(f"Error in group by operation: {str(e)}")
         return df
@@ -136,49 +218,124 @@ def export_cleaning_code(cleaning_steps: List[Dict[str, Any]]) -> str:
 
     code = [
         "import pandas as pd",
-        "import numpy as np\n",
-        "# Load your CSV file",
-        "df = pd.read_csv('your_file.csv')\n",
-        "# Track the original data",
-        "original_df = df.copy()\n"
+        "import polars as pl",
+        "import numpy as np",
+        "\n# Choose your preferred library",
+        "use_polars = True  # Set to False to use pandas\n",
+        "if use_polars:",
+        "    # Load your data file with Polars",
+        "    df = pl.read_csv('your_file.csv')  # or read_parquet, etc.",
+        "    original_df = df.clone()",
+        "else:",
+        "    # Load your data file with Pandas",
+        "    df = pd.read_csv('your_file.csv')",
+        "    original_df = df.copy()",
+        "\n# Helper functions for Polars/Pandas compatibility",
+        "def to_polars(df_pandas):",
+        "    return pl.from_pandas(df_pandas)",
+        "def to_pandas(df_polars):",
+        "    return df_polars.to_pandas()\n"
     ]
 
     for step in cleaning_steps:
         if step['type'] == 'missing_values':
             if step['strategy'] == 'drop':
                 code.append("# Drop missing values")
-                code.append("df = df.dropna()")
+                code.append("if use_polars:")
+                code.append("    df = df.drop_nulls()")
+                code.append("else:")
+                code.append("    df = df.dropna()")
             else:
                 code.append(f"# Fill missing values using {step['strategy']}")
                 if step['strategy'] == 'fill_value':
-                    code.append(f"df = df.fillna({step['value']})")
+                    code.append("if use_polars:")
+                    code.append(f"    df = df.fill_null({step['value']})")
+                    code.append("else:")
+                    code.append(f"    df = df.fillna({step['value']})")
                 elif step['strategy'] in ['fill_mean', 'fill_median']:
                     method = step['strategy'].split('_')[1]
-                    code.append("# Handle numeric columns only")
-                    code.append(f"numeric_cols = df.select_dtypes(include=['int64', 'float64']).columns")
-                    code.append(f"df[numeric_cols] = df[numeric_cols].fillna(df[numeric_cols].{method}())")
+                    code.append("if use_polars:")
+                    code.append("    # Get numeric columns and fill with " + method)
+                    code.append("    numeric_cols = [col for col in df.columns if df[col].dtype in [pl.Float32, pl.Float64, pl.Int32, pl.Int64]]")
+                    code.append("    for col in numeric_cols:")
+                    code.append(f"        df = df.with_columns(pl.col(col).fill_null(pl.col(col).{method}()))")
+                    code.append("else:")
+                    code.append("    # Handle numeric columns only")
+                    code.append("    numeric_cols = df.select_dtypes(include=['int64', 'float64']).columns")
+                    code.append(f"    df[numeric_cols] = df[numeric_cols].fillna(df[numeric_cols].{method}())")
                 elif step['strategy'] == 'fill_mode':
-                    code.append("# Handle numeric and non-numeric columns separately")
-                    code.append("numeric_cols = df.select_dtypes(include=['int64', 'float64']).columns")
-                    code.append("non_numeric_cols = df.select_dtypes(exclude=['int64', 'float64']).columns")
-                    code.append("for col in numeric_cols:")
-                    code.append("    df[col] = df[col].fillna(df[col].mode().iloc[0] if not df[col].mode().empty else 0)")
-                    code.append("for col in non_numeric_cols:")
-                    code.append("    df[col] = df[col].fillna(df[col].mode().iloc[0] if not df[col].mode().empty else '')")
+                    code.append("if use_polars:")
+                    code.append("    # Handle numeric and non-numeric columns separately")
+                    code.append("    numeric_dtypes = [pl.Float32, pl.Float64, pl.Int32, pl.Int64]")
+                    code.append("    numeric_cols = [col for col in df.columns if df[col].dtype in numeric_dtypes]")
+                    code.append("    non_numeric_cols = [col for col in df.columns if col not in numeric_cols]")
+                    code.append("    for col in numeric_cols:")
+                    code.append("        mode_val = df.select(pl.col(col).mode().first()).item()")
+                    code.append("        df = df.with_columns(pl.col(col).fill_null(mode_val if mode_val is not None else 0))")
+                    code.append("    for col in non_numeric_cols:")
+                    code.append("        mode_val = df.select(pl.col(col).mode().first()).item()")
+                    code.append("        df = df.with_columns(pl.col(col).fill_null(mode_val if mode_val is not None else ''))")
+                    code.append("else:")
+                    code.append("    # Handle numeric and non-numeric columns separately")
+                    code.append("    numeric_cols = df.select_dtypes(include=['int64', 'float64']).columns")
+                    code.append("    non_numeric_cols = df.select_dtypes(exclude=['int64', 'float64']).columns")
+                    code.append("    for col in numeric_cols:")
+                    code.append("        df[col] = df[col].fillna(df[col].mode().iloc[0] if not df[col].mode().empty else 0)")
+                    code.append("    for col in non_numeric_cols:")
+                    code.append("        df[col] = df[col].fillna(df[col].mode().iloc[0] if not df[col].mode().empty else '')")
         elif step['type'] == 'group_by':
-            code.append("# Group by operation")
             cols = ", ".join([f"'{col}'" for col in step['columns']])
-            code.append("# Get numeric columns for aggregation")
-            code.append("numeric_cols = df.select_dtypes(include=['int64', 'float64']).columns")
-            code.append("# Filter out group columns from numeric columns")
-            code.append(f"agg_cols = [col for col in numeric_cols if col not in [{cols}]]")
-            code.append("# Create aggregation dictionary")
-            code.append(f"agg_dict = {{col: '{step['agg_func']}' for col in agg_cols}}")
-            code.append(f"df = df.groupby([{cols}]).agg(agg_dict).reset_index()")
+            code.append("# Group by operation")
+            code.append("if use_polars:")
+            code.append("    # Get numeric columns for aggregation")
+            code.append("    numeric_dtypes = [pl.Float32, pl.Float64, pl.Int32, pl.Int64]")
+            code.append("    numeric_cols = [col for col in df.columns if df[col].dtype in numeric_dtypes")
+            code.append(f"                   and col not in [{cols}]]")
+            code.append("    if numeric_cols:")
+            code.append("        # Create aggregation expressions")
+            code.append(f"        agg_exprs = [pl.col(col).agg_groups('{step['agg_func']}').alias(col)")
+            code.append("                      for col in numeric_cols]")
+            code.append(f"        df = df.group_by([{cols}]).agg(agg_exprs)")
+            code.append("else:")
+            code.append("    # Get numeric columns for aggregation")
+            code.append("    numeric_cols = df.select_dtypes(include=['int64', 'float64']).columns")
+            code.append("    # Filter out group columns from numeric columns")
+            code.append(f"    agg_cols = [col for col in numeric_cols if col not in [{cols}]]")
+            code.append("    # Create aggregation dictionary")
+            code.append(f"    agg_dict = {{col: '{step['agg_func']}' for col in agg_cols}}")
+            code.append(f"    df = df.groupby([{cols}]).agg(agg_dict).reset_index()")
         elif step['type'] == 'filter':
             code.append("# Apply filter")
             escaped_query = escape_string(step['query'])
-            code.append(f"df = df.query('{escaped_query}')")
+            code.append("if use_polars:")
+            code.append(f"    query = '{escaped_query}'.replace('==', '=')")  # Convert pandas query to polars
+            code.append("    df = df.filter(pl.expr(query))")
+            code.append("else:")
+            code.append(f"    df = df.query('{escaped_query}')")
+        elif step['type'] == 'data_type_conversion':
+            code.append(f"# Convert '{step['column']}' to {step['target_type']}")
+            code.append("if use_polars:")
+            if step['target_type'] == 'int':
+                code.append(f"    df = df.with_columns(pl.col('{step['column']}').cast(pl.Int64, strict=False))")
+            elif step['target_type'] == 'float':
+                code.append(f"    df = df.with_columns(pl.col('{step['column']}').cast(pl.Float64, strict=False))")
+            elif step['target_type'] == 'datetime':
+                code.append(f"    df = df.with_columns(pl.col('{step['column']}').str.strptime(pl.Datetime, strict=False))")
+            elif step['target_type'] == 'string':
+                code.append(f"    df = df.with_columns(pl.col('{step['column']}').cast(pl.Utf8))")
+            elif step['target_type'] == 'boolean':
+                code.append(f"    df = df.with_columns(pl.col('{step['column']}').cast(pl.Boolean))")
+            code.append("else:")
+            if step['target_type'] == 'int':
+                code.append(f"    df['{step['column']}'] = pd.to_numeric(df['{step['column']}'], errors='coerce').astype('Int64')")
+            elif step['target_type'] == 'float':
+                code.append(f"    df['{step['column']}'] = pd.to_numeric(df['{step['column']}'], errors='coerce')")
+            elif step['target_type'] == 'datetime':
+                code.append(f"    df['{step['column']}'] = pd.to_datetime(df['{step['column']}'], errors='coerce')")
+            elif step['target_type'] == 'string':
+                code.append(f"    df['{step['column']}'] = df['{step['column']}'].astype(str)")
+            elif step['target_type'] == 'boolean':
+                code.append(f"    df['{step['column']}'] = df['{step['column']}'].astype(bool)")
 
     # Add a comment about resetting data if needed
     code.append("\n# To reset to original data:")
@@ -205,8 +362,11 @@ def main():
     with st.sidebar:
         st.header("Data Cleaning Controls")
 
-        # File upload
-        uploaded_file = st.file_uploader("Choose a CSV file", type="csv")
+        # File upload with multiple file types
+        uploaded_file = st.file_uploader(
+            "Choose a data file",
+            type=list(SUPPORTED_FILE_TYPES.keys())
+        )
 
         # Handle file upload and maintain session state
         if uploaded_file is not None:
@@ -214,11 +374,24 @@ def main():
 
             # Only reset if a new file is uploaded
             if current_file != uploaded_file.name:
-                st.session_state.df = pd.read_csv(uploaded_file)
-                st.session_state.original_df = st.session_state.df.copy()
-                st.session_state.cleaning_steps = []
-                st.session_state.current_file = uploaded_file.name
-                # st.write("Debug: New file uploaded, reset cleaning steps")
+                try:
+                    # Load data using Polars
+                    polars_df, file_type = load_dataframe(uploaded_file)
+
+                    # Convert to pandas for compatibility with existing functions
+                    pandas_df = polars_to_pandas(polars_df)
+
+                    # Update session state
+                    st.session_state.df = pandas_df
+                    st.session_state.original_df = pandas_df.copy()
+                    st.session_state.polars_df = polars_df  # Keep Polars DataFrame for optimized operations
+                    st.session_state.cleaning_steps = []
+                    st.session_state.current_file = uploaded_file.name
+                    st.session_state.file_type = file_type
+
+                    st.success(f"Successfully loaded {SUPPORTED_FILE_TYPES[file_type]} file")
+                except Exception as e:
+                    st.error(f"Error loading file: {str(e)}")
 
         if st.session_state.df is not None:
             # Missing values handling
@@ -237,25 +410,71 @@ def main():
                 # Store current steps before operation
                 current_steps = st.session_state.get('cleaning_steps', []).copy()
 
-                st.session_state.df = handle_missing_values(
-                    st.session_state.df,
-                    missing_strategy,
-                    fill_value
-                )
+                try:
+                    # Convert to Polars, apply missing values strategy, and convert back
+                    polars_df = pandas_to_polars(st.session_state.df)
+                    processed_df = handle_missing_values(
+                        polars_df,
+                        missing_strategy,
+                        fill_value
+                    )
+                    st.session_state.df = polars_to_pandas(processed_df)
 
-                # Add the operation to cleaning steps
-                cleaning_step = {
-                    'type': 'missing_values',
-                    'strategy': missing_strategy,
-                    'value': fill_value
-                }
+                    # Add the operation to cleaning steps
+                    cleaning_step = {
+                        'type': 'missing_values',
+                        'strategy': missing_strategy,
+                        'value': fill_value
+                    }
 
-                # Update cleaning steps while preserving previous steps
-                if 'cleaning_steps' not in st.session_state:
-                    st.session_state.cleaning_steps = []
-                st.session_state.cleaning_steps = current_steps + [cleaning_step]
-                # st.write("Debug: Current cleaning steps:", st.session_state.cleaning_steps)
-                st.success(f"Missing values handled successfully using {missing_strategy}")
+                    # Update cleaning steps while preserving previous steps
+                    if 'cleaning_steps' not in st.session_state:
+                        st.session_state.cleaning_steps = []
+                    st.session_state.cleaning_steps = current_steps + [cleaning_step]
+                    st.success(f"Missing values handled successfully using {missing_strategy}")
+                except Exception as e:
+                    st.error(f"Error handling missing values: {str(e)}")
+
+            # Data type conversion
+            st.subheader("Convert Data Types")
+            conversion_col = st.selectbox(
+                "Select column to convert",
+                options=st.session_state.df.columns,
+                key="conversion_col"
+            )
+            target_type = st.selectbox(
+                "Target data type",
+                options=["int", "float", "string", "datetime", "boolean"],
+                key="target_type"
+            )
+            convert_type_button = st.button("Convert Data Type")
+            if convert_type_button:
+                # Store current steps before operation
+                current_steps = st.session_state.get('cleaning_steps', []).copy()
+
+                try:
+                    # Convert to Polars, apply type conversion, and convert back
+                    polars_df = pandas_to_polars(st.session_state.df)
+                    processed_df = convert_data_types(
+                        polars_df,
+                        {conversion_col: target_type}
+                    )
+                    st.session_state.df = polars_to_pandas(processed_df)
+
+                    # Add the operation to cleaning steps
+                    cleaning_step = {
+                        'type': 'data_type_conversion',
+                        'column': conversion_col,
+                        'target_type': target_type
+                    }
+
+                    # Update cleaning steps while preserving previous steps
+                    if 'cleaning_steps' not in st.session_state:
+                        st.session_state.cleaning_steps = []
+                    st.session_state.cleaning_steps = current_steps + [cleaning_step]
+                    st.success(f"Converted '{conversion_col}' to {target_type}")
+                except Exception as e:
+                    st.error(f"Error converting data type: {str(e)}")
 
             # Group by operations
             st.subheader("Group By")
@@ -273,25 +492,30 @@ def main():
                     # Store current steps before operation
                     current_steps = st.session_state.get('cleaning_steps', []).copy()
 
-                    st.session_state.df = apply_group_by(
-                        st.session_state.df,
-                        group_cols,
-                        agg_func
-                    )
+                    try:
+                        # Convert to Polars, apply group by, and convert back
+                        polars_df = pandas_to_polars(st.session_state.df)
+                        processed_df = apply_group_by(
+                            polars_df,
+                            group_cols,
+                            agg_func
+                        )
+                        st.session_state.df = polars_to_pandas(processed_df)
 
-                    # Add the operation to cleaning steps
-                    cleaning_step = {
-                        'type': 'group_by',
-                        'columns': group_cols,
-                        'agg_func': agg_func
-                    }
+                        # Add the operation to cleaning steps
+                        cleaning_step = {
+                            'type': 'group_by',
+                            'columns': group_cols,
+                            'agg_func': agg_func
+                        }
 
-                    # Update cleaning steps while preserving previous steps
-                    if 'cleaning_steps' not in st.session_state:
-                        st.session_state.cleaning_steps = []
-                    st.session_state.cleaning_steps = current_steps + [cleaning_step]
-                    # st.write("Debug: Current cleaning steps:", st.session_state.cleaning_steps)
-                    st.success(f"Group by applied successfully on {', '.join(group_cols)} with {agg_func}")
+                        # Update cleaning steps while preserving previous steps
+                        if 'cleaning_steps' not in st.session_state:
+                            st.session_state.cleaning_steps = []
+                        st.session_state.cleaning_steps = current_steps + [cleaning_step]
+                        st.success(f"Group by applied successfully on {', '.join(group_cols)} with {agg_func}")
+                    except Exception as e:
+                        st.error(f"Error in group by operation: {str(e)}")
 
     # Main panel
     if st.session_state.df is not None:
@@ -310,31 +534,27 @@ def main():
         st.subheader("Filter Data")
         filter_query = st.text_input("Enter filter query (e.g., 'column > 5')")
         if filter_query:
-            is_valid, error_msg = validate_query(st.session_state.df, filter_query)
-            if is_valid:
-                try:
-                    filtered_df = st.session_state.df.query(filter_query)
-                    if len(filtered_df) > 0:
-                        st.session_state.df = filtered_df
-                        # Store current steps before operation
-                        current_steps = st.session_state.get('cleaning_steps', []).copy()
+            is_valid, error_msg, filtered_df = validate_and_apply_filter(pandas_to_polars(st.session_state.df), filter_query)
+            if is_valid and filtered_df is not None:
+                # Store current steps before operation
+                current_steps = st.session_state.get('cleaning_steps', []).copy()
 
-                        # Add the operation to cleaning steps
-                        cleaning_step = {
-                            'type': 'filter',
-                            'query': filter_query
-                        }
+                # Update DataFrame in session state
+                st.session_state.df = polars_to_pandas(filtered_df)
 
-                        # Update cleaning steps while preserving previous steps
-                        if 'cleaning_steps' not in st.session_state:
-                            st.session_state.cleaning_steps = []
-                        st.session_state.cleaning_steps = current_steps + [cleaning_step]
-                        # st.write("Debug: Current cleaning steps:", st.session_state.cleaning_steps)
-                        st.success(f"Filter applied successfully: {filter_query}")
-                    else:
-                        st.warning("Filter resulted in empty DataFrame")
-                except Exception as e:
-                    st.error(f"Error applying filter: {str(e)}")
+                # Add the operation to cleaning steps
+                cleaning_step = {
+                    'type': 'filter',
+                    'query': filter_query
+                }
+
+                # Update cleaning steps while preserving previous steps
+                if 'cleaning_steps' not in st.session_state:
+                    st.session_state.cleaning_steps = []
+                st.session_state.cleaning_steps = current_steps + [cleaning_step]
+                st.success(f"Filter applied successfully: {filter_query}")
+            elif is_valid:
+                st.warning("Filter resulted in empty DataFrame")
             else:
                 st.error(f"Invalid query: {error_msg}")
 
