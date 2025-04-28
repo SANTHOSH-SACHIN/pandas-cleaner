@@ -7,6 +7,7 @@ from datetime import datetime
 import os
 from pathlib import Path
 from typing import List, Dict, Any, Union, Optional, Tuple
+from pandas_cleaner.visualizations import PLOT_TYPES, COLOR_SCHEMES, create_correlation_heatmap
 
 # File type constants
 SUPPORTED_FILE_TYPES = {
@@ -220,6 +221,8 @@ def export_cleaning_code(cleaning_steps: List[Dict[str, Any]]) -> str:
         "import pandas as pd",
         "import polars as pl",
         "import numpy as np",
+        "import plotly.express as px",
+        "import plotly.graph_objects as go",
         "\n# Choose your preferred library",
         "use_polars = True  # Set to False to use pandas\n",
         "if use_polars:",
@@ -312,6 +315,36 @@ def export_cleaning_code(cleaning_steps: List[Dict[str, Any]]) -> str:
             code.append("    df = df.filter(pl.expr(query))")
             code.append("else:")
             code.append(f"    df = df.query('{escaped_query}')")
+        elif step['type'] == 'visualization':
+            code.append(f"# Create {step['plot_type']}")
+            if step['plot_type'] == 'Correlation Heatmap':
+                code.append(f"heatmap_fig = create_correlation_heatmap(df, {step['columns']})")
+                code.append("heatmap_fig.show()")
+            elif step['plot_type'] in ['Histogram', 'Box Plot']:
+                if 'group_by' in step and step['group_by']:
+                    code.append(f"fig = create_{step['plot_type'].lower().replace(' ', '_')}(df, '{step['column']}', '{step['group_by']}', '{step['color_scheme']}')")
+                else:
+                    if 'nbins' in step:
+                        code.append(f"fig = create_{step['plot_type'].lower().replace(' ', '_')}(df, '{step['column']}', '{step['color_scheme']}', nbins={step['nbins']})")
+                    else:
+                        code.append(f"fig = create_{step['plot_type'].lower().replace(' ', '_')}(df, '{step['column']}', color_scheme='{step['color_scheme']}')")
+                code.append("fig.show()")
+            elif step['plot_type'] in ['Scatter Plot', 'Line Plot', 'Bar Plot']:
+                if step['plot_type'] == 'Scatter Plot' and 'size_column' in step:
+                    code.append(f"fig = create_{step['plot_type'].lower().replace(' ', '_')}(")
+                    code.append(f"    df, '{step['x_column']}', '{step['y_column']}',")
+                    code.append(f"    color_column='{step['color_column']}' if '{step['color_column']}' else None,")
+                    code.append(f"    size_column='{step['size_column']}' if '{step['size_column']}' else None,")
+                    code.append(f"    color_scheme='{step['color_scheme']}'")
+                    code.append(")")
+                else:
+                    code.append(f"fig = create_{step['plot_type'].lower().replace(' ', '_')}(")
+                    code.append(f"    df, '{step['x_column']}', '{step['y_column']}',")
+                    code.append(f"    color_column='{step['color_column']}' if '{step['color_column']}' else None,")
+                    code.append(f"    color_scheme='{step['color_scheme']}'")
+                    code.append(")")
+                code.append("fig.show()")
+
         elif step['type'] == 'data_type_conversion':
             code.append(f"# Convert '{step['column']}' to {step['target_type']}")
             code.append("if use_polars:")
@@ -337,9 +370,75 @@ def export_cleaning_code(cleaning_steps: List[Dict[str, Any]]) -> str:
             elif step['target_type'] == 'boolean':
                 code.append(f"    df['{step['column']}'] = df['{step['column']}'].astype(bool)")
 
-    # Add a comment about resetting data if needed
-    code.append("\n# To reset to original data:")
-    code.append("# df = original_df.copy()")
+    # Add visualization helper functions
+    code.extend([
+        "\n# Visualization helper functions",
+        "def create_histogram(df, column, color_scheme='YlOrRd', nbins=30):",
+        "    colors = getattr(px.colors.sequential, color_scheme)",
+        "    fig = px.histogram(df, x=column, nbins=nbins, color_discrete_sequence=colors)",
+        "    fig.update_layout(",
+        "        title=f'Histogram of {column}',",
+        "        xaxis_title=column,",
+        "        yaxis_title='Count',",
+        "        hovermode='x',",
+        "        template='plotly_white'",
+        "    )",
+        "    return fig",
+        "",
+        "def create_scatter_plot(df, x_column, y_column, color_column=None, size_column=None, color_scheme='YlOrRd'):",
+        "    fig = px.scatter(",
+        "        df, x=x_column, y=y_column,",
+        "        color=color_column,",
+        "        size=size_column,",
+        "        color_discrete_sequence=getattr(px.colors.sequential, color_scheme)",
+        "    )",
+        "    fig.update_layout(",
+        "        title=f'{y_column} vs {x_column}',",
+        "        xaxis_title=x_column,",
+        "        yaxis_title=y_column,",
+        "        template='plotly_white'",
+        "    )",
+        "    return fig",
+        "",
+        "def create_correlation_heatmap(df, numeric_columns):",
+        "    corr_matrix = df[numeric_columns].corr()",
+        "    fig = px.imshow(",
+        "        corr_matrix,",
+        "        color_continuous_scale='RdBu',",
+        "        aspect='auto'",
+        "    )",
+        "    fig.update_layout(",
+        "        title='Correlation Heatmap',",
+        "        template='plotly_white'",
+        "    )",
+        "    return fig"
+    ])
+
+    # Example visualization usage
+    code.extend([
+        "\n# Example visualizations",
+        "# Create and display a histogram",
+        "hist_fig = create_histogram(df, 'your_column_name', nbins=30)",
+        "# hist_fig.show()  # Uncomment to display",
+        "",
+        "# Create and display a scatter plot",
+        "scatter_fig = create_scatter_plot(df, 'x_column', 'y_column', color_column='category_column')",
+        "# scatter_fig.show()  # Uncomment to display",
+        "",
+        "# Create and display a correlation heatmap",
+        "numeric_cols = df.select_dtypes(include=['int64', 'float64']).columns.tolist()",
+        "heatmap_fig = create_correlation_heatmap(df, numeric_cols)",
+        "# heatmap_fig.show()  # Uncomment to display"
+    ])
+
+    # Add notes about resetting data
+    code.extend([
+        "\n# To reset to original data:",
+        "# df = original_df.copy()",
+        "",
+        "# Note: When using in a notebook or script, remove the '#' from .show()",
+        "# calls to display the visualizations"
+    ])
 
     return "\n".join(code)
 
@@ -557,6 +656,128 @@ def main():
                 st.warning("Filter resulted in empty DataFrame")
             else:
                 st.error(f"Invalid query: {error_msg}")
+
+        # Data Visualization Section
+        st.subheader("Data Visualization")
+
+        # Plot type selection
+        plot_type = st.selectbox("Select Plot Type", list(PLOT_TYPES.keys()))
+
+        # Column selection based on plot type
+        if plot_type == 'Correlation Heatmap':
+            numeric_cols = st.session_state.df.select_dtypes(include=['int64', 'float64']).columns.tolist()
+            selected_cols = st.multiselect('Select numeric columns for correlation', numeric_cols, default=numeric_cols[:min(5, len(numeric_cols))])
+            if selected_cols:
+                # Store current steps before visualization
+                current_steps = st.session_state.get('cleaning_steps', []).copy()
+
+                fig = create_correlation_heatmap(st.session_state.df, selected_cols)
+                st.plotly_chart(fig, use_container_width=True)
+
+                # Add visualization step
+                viz_step = {
+                    'type': 'visualization',
+                    'plot_type': 'Correlation Heatmap',
+                    'columns': selected_cols
+                }
+                st.session_state.cleaning_steps = current_steps + [viz_step]
+        else:
+            # Color scheme selection
+            color_scheme = st.selectbox('Select Color Scheme', COLOR_SCHEMES)
+
+            # Column selections based on plot type
+            if plot_type in ['Histogram', 'Box Plot']:
+                column = st.selectbox('Select Column', st.session_state.df.columns)
+                if plot_type == 'Box Plot':
+                    group_by = st.selectbox('Group By (Optional)', ['None'] + list(st.session_state.df.columns))
+                    if group_by != 'None':
+                        current_steps = st.session_state.get('cleaning_steps', []).copy()
+                        fig = PLOT_TYPES[plot_type](st.session_state.df, column, group_by, color_scheme)
+
+                        # Add visualization step
+                        viz_step = {
+                            'type': 'visualization',
+                            'plot_type': plot_type,
+                            'column': column,
+                            'group_by': group_by,
+                            'color_scheme': color_scheme
+                        }
+                        st.session_state.cleaning_steps = current_steps + [viz_step]
+                    else:
+                        current_steps = st.session_state.get('cleaning_steps', []).copy()
+                        fig = PLOT_TYPES[plot_type](st.session_state.df, column, color_scheme=color_scheme)
+
+                        # Add visualization step
+                        viz_step = {
+                            'type': 'visualization',
+                            'plot_type': plot_type,
+                            'column': column,
+                            'color_scheme': color_scheme
+                        }
+                        st.session_state.cleaning_steps = current_steps + [viz_step]
+                else:
+                    nbins = st.slider('Number of bins', 5, 100, 30)
+                    current_steps = st.session_state.get('cleaning_steps', []).copy()
+                    fig = PLOT_TYPES[plot_type](st.session_state.df, column, color_scheme, nbins)
+
+                    # Add visualization step
+                    viz_step = {
+                        'type': 'visualization',
+                        'plot_type': plot_type,
+                        'column': column,
+                        'color_scheme': color_scheme,
+                        'nbins': nbins
+                    }
+                    st.session_state.cleaning_steps = current_steps + [viz_step]
+
+            elif plot_type in ['Scatter Plot', 'Line Plot', 'Bar Plot']:
+                x_column = st.selectbox('Select X Column', st.session_state.df.columns)
+                y_column = st.selectbox('Select Y Column', st.session_state.df.columns)
+                color_column = st.selectbox('Color By (Optional)', ['None'] + list(st.session_state.df.columns))
+
+                if plot_type == 'Scatter Plot':
+                    size_column = st.selectbox('Size By (Optional)', ['None'] + list(st.session_state.df.columns))
+                    current_steps = st.session_state.get('cleaning_steps', []).copy()
+                    fig = PLOT_TYPES[plot_type](
+                        st.session_state.df, x_column, y_column,
+                        color_column if color_column != 'None' else None,
+                        size_column if size_column != 'None' else None,
+                        color_scheme
+                    )
+
+                    # Add visualization step
+                    viz_step = {
+                        'type': 'visualization',
+                        'plot_type': plot_type,
+                        'x_column': x_column,
+                        'y_column': y_column,
+                        'color_column': color_column if color_column != 'None' else None,
+                        'size_column': size_column if size_column != 'None' else None,
+                        'color_scheme': color_scheme
+                    }
+                    st.session_state.cleaning_steps = current_steps + [viz_step]
+                else:
+                    current_steps = st.session_state.get('cleaning_steps', []).copy()
+                    fig = PLOT_TYPES[plot_type](
+                        st.session_state.df, x_column, y_column,
+                        color_column if color_column != 'None' else None,
+                        color_scheme
+                    )
+
+                    # Add visualization step
+                    viz_step = {
+                        'type': 'visualization',
+                        'plot_type': plot_type,
+                        'x_column': x_column,
+                        'y_column': y_column,
+                        'color_column': color_column if color_column != 'None' else None,
+                        'color_scheme': color_scheme
+                    }
+                    st.session_state.cleaning_steps = current_steps + [viz_step]
+
+            # Display the plot
+            if 'fig' in locals():
+                st.plotly_chart(fig, use_container_width=True)
 
         # Export cleaning code
         st.subheader("Export Cleaning Code")

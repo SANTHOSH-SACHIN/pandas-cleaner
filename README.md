@@ -2,17 +2,29 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python Version](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
-[![Version](https://img.shields.io/badge/version-0.2.0-green.svg)](https://github.com/SANTHOSH-SACHIN/pandas-cleaner)
+[![Version](https://img.shields.io/badge/version-0.4.0-green.svg)](https://github.com/SANTHOSH-SACHIN/pandas-cleaner)
 
 A high-performance interactive data cleaning tool with a Streamlit UI that combines the power of Polars and Pandas for optimal performance. Clean your data from multiple formats (CSV, Excel, Parquet) with an intuitive interface while generating production-ready Python code. Choose between lightning-fast Polars operations or familiar Pandas syntax for your data cleaning needs.
 
 ## ✨ Features
 
-- 📊 Interactive DataFrame Visualization
+- 📊 Interactive DataFrame Visualization & Analytics
   - Support for multiple file formats (CSV, Excel, Parquet)
   - Upload and view data in a responsive table interface
   - Sort columns with a single click
   - Real-time data preview
+  - Interactive data visualization with Plotly:
+    - Histograms for distribution analysis
+    - Box plots with optional grouping
+    - Scatter plots with color and size mapping
+    - Line plots for trend analysis
+    - Bar plots for categorical data
+    - Correlation heatmaps for numeric columns
+  - Customizable visualizations:
+    - Multiple color schemes
+    - Adjustable plot parameters
+    - Interactive tooltips and zooming
+    - Responsive layout
 
 - 🧰 High-Performance Data Cleaning Tools
   - Powered by Polars for lightning-fast data operations
@@ -110,7 +122,62 @@ pandas-cleaner start --port 8000  # Use custom port
    - Copy-paste into your data pipeline
    - All operations are automatically logged
 
-4. ⏱ **Session Management**
+4. 📊 **Visualize Your Data**
+   - Choose from multiple plot types:
+     ```python
+     # Create a histogram
+     hist_fig = create_histogram(df, 'age', color_scheme='Viridis', nbins=30)
+     hist_fig.show()
+
+     # Create a scatter plot with color and size mapping
+     scatter_fig = create_scatter_plot(
+         df, 'salary', 'experience',
+         color_column='department',
+         size_column='performance',
+         color_scheme='Plasma'
+     )
+     scatter_fig.show()
+
+     # Create a correlation heatmap
+     numeric_cols = df.select_dtypes(include=['int64', 'float64']).columns
+     heatmap_fig = create_correlation_heatmap(df, numeric_cols)
+     heatmap_fig.show()
+     ```
+
+   - Customize your visualizations:
+     ```python
+     # Box plot with grouping
+     box_fig = create_box_plot(
+         df, 'salary', group_by='department',
+         color_scheme='YlOrRd'
+     )
+     box_fig.show()
+
+     # Line plot with color mapping
+     line_fig = create_line_plot(
+         df, 'date', 'sales',
+         color_column='region',
+         color_scheme='Blues'
+     )
+     line_fig.show()
+
+     # Bar plot with categories
+     bar_fig = create_bar_plot(
+         df, 'category', 'count',
+         color_column='status',
+         color_scheme='RdBu'
+     )
+     bar_fig.show()
+     ```
+
+   - Interactive features:
+     - Zoom and pan: Use the built-in plot controls
+     - Hover tooltips: Mouse over data points for details
+     - Click-and-drag to select regions
+     - Double-click to reset view
+     - Download plots as PNG files using the export button
+
+5. ⏱ **Session Management**
    - Work is automatically saved
    - Resume from where you left off
    - Switch between multiple sessions
@@ -121,6 +188,44 @@ pandas-cleaner start --port 8000  # Use custom port
 - **Complex Queries**: Use the full power of Pandas query syntax
 - **Aggregation Functions**: Support for sum, mean, count, min, max, and more
 - **State Management**: Improved persistence between operations
+
+## 🔄 What's New in v0.4.0
+
+### Major Features
+1. Added Interactive Data Visualization:
+   - Comprehensive visualization suite powered by Plotly
+   - Multiple plot types: histograms, box plots, scatter plots, line plots, bar plots, and correlation heatmaps
+   - Interactive features like zooming, panning, and tooltips
+   - Customizable color schemes and plot parameters
+   - Automatic generation of visualization code
+   - State tracking for visualization operations
+
+2. Enhanced Code Generation:
+   - Added visualization helper functions in generated code
+   - Proper handling of visualization steps
+   - Complete setup for Plotly integration
+   - Example visualization code with comments
+   - Auto-configuration of plot parameters
+
+3. Improved UI/UX:
+   - Intuitive visualization controls
+   - Dynamic parameter selection based on plot type
+   - Real-time plot updates
+   - Responsive plot sizing
+   - Easy plot customization options
+
+### Bug Fixes and Improvements
+1. Fixed visualization integration:
+   - Proper color scheme handling
+   - Correct plot parameter management
+   - Fixed plot display issues
+   - Added error handling for invalid data
+
+2. Enhanced state management:
+   - Added visualization step tracking
+   - Improved session persistence
+   - Better error messages
+   - Fixed step ordering
 
 ## 🔄 What's New in v0.3.0
 
@@ -216,6 +321,7 @@ Join our community of contributors and help make data cleaning more efficient!
   - pandas ≥ 2.2.3
   - polars ≥ 0.20.15
   - numpy ≥ 2.2.4
+  - plotly ≥ 5.0.0
   - openpyxl ≥ 3.1.2
   - pyarrow ≥ 15.0.0
 
@@ -228,6 +334,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - Built with [Streamlit](https://streamlit.io/)
 - High-performance operations by [Polars](https://www.pola.rs/)
 - Data analysis with [Pandas](https://pandas.pydata.org/)
+- Interactive visualizations with [Plotly](https://plotly.com/)
 - Future optimizations with [Rust](https://www.rust-lang.org/)
 
 ## 🚀 Roadmap
@@ -236,5 +343,5 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [ ] Implement machine learning-based data cleaning suggestions
 - [ ] Add support for more data formats (JSON, SQL, etc.)
 - [ ] Create a plugin system for custom cleaning operations
-- [ ] Add data visualization features
+- [ ] Add advanced data visualization features (3D plots, animations)
 - [ ] Implement automated data quality checks

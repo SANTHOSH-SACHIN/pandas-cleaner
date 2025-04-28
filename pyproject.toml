@@ -1,6 +1,6 @@
 [project]
 name = "pandas-cleaner"
-version = "0.3.0"
+version = "0.4.0"  # Updated with interactive data visualization features
 description = "A high-performance interactive data cleaning tool with Streamlit UI and Rust integration capabilities"
 readme = "README.md"
 authors = [
@@ -22,6 +22,8 @@ dependencies = [
     "openpyxl>=3.1.2",  # For Excel files
     "pyarrow>=15.0.0",  # For Parquet files
     "polars>=0.20.15",  # For faster data processing
+    "plotly>=5.0.0",    # For interactive visualizations
+    "streamlit-plotly-events>=0.0.4",  # For handling Plotly events in Streamlit
 ]
 
 
