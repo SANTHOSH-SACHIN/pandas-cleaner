@@ -446,16 +446,70 @@ def main():
     """Main Streamlit application."""
     st.title("PandasCleaner")
 
-    # Initialize session state just once and properly handle session persistence
+    # Setup database connection
+    conn = setup_database()
+
+    # Session Manager
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("Session Manager")
+
+    # List available sessions
+    cursor = conn.cursor()
+    cursor.execute('SELECT session_id, last_modified FROM sessions ORDER BY last_modified DESC')
+    sessions = cursor.fetchall()
+
+    if sessions:
+        session_options = {f"Session from {s[1]} ({s[0]})": s[0] for s in sessions}
+        selected_session = st.sidebar.selectbox(
+            "Load Previous Session",
+            options=list(session_options.keys())
+        )
+
+        if st.sidebar.button("Load Selected Session"):
+            session_id = session_options[selected_session]
+            df, cleaning_steps = load_session(conn, session_id)
+            if df is not None:
+                st.session_state.df = df
+                st.session_state.original_df = df.copy()
+                st.session_state.cleaning_steps = cleaning_steps
+                st.session_state.session_id = session_id
+                st.success(f"Session {session_id} loaded successfully!")
+            else:
+                st.error("Failed to load session.")
+
+
+    # Initialize session state and load previous session if exists
     if 'initialized' not in st.session_state:
         init_session_state()
+
+        # Try to load last session
+        cursor = conn.cursor()
+        cursor.execute('SELECT session_id, data, cleaning_steps FROM sessions ORDER BY last_modified DESC LIMIT 1')
+        result = cursor.fetchone()
+
+        if result:
+            session_id, data, steps = result
+            try:
+                df = pd.read_json(data)
+                cleaning_steps = json.loads(steps)
+
+                st.session_state.df = df
+                st.session_state.original_df = df.copy()
+                st.session_state.cleaning_steps = cleaning_steps
+                st.session_state.session_id = session_id
+
+                st.success("Previous session restored!")
+            except Exception as e:
+                st.error(f"Error loading previous session: {str(e)}")
     else:
         # Ensure cleaning_steps exists even after rerun
         if 'cleaning_steps' not in st.session_state:
             st.session_state.cleaning_steps = []
 
-    # Setup database connection
-    conn = setup_database()
+    # Keep track of session duration
+    if 'start_time' not in st.session_state:
+        st.session_state.start_time = datetime.now()
+
 
     # Sidebar
     with st.sidebar:
@@ -530,6 +584,14 @@ def main():
                     if 'cleaning_steps' not in st.session_state:
                         st.session_state.cleaning_steps = []
                     st.session_state.cleaning_steps = current_steps + [cleaning_step]
+
+                    # Save session after operation
+                    save_session(
+                        conn,
+                        st.session_state.session_id,
+                        st.session_state.df,
+                        st.session_state.cleaning_steps
+                    )
                     st.success(f"Missing values handled successfully using {missing_strategy}")
                 except Exception as e:
                     st.error(f"Error handling missing values: {str(e)}")
@@ -571,6 +633,14 @@ def main():
                     if 'cleaning_steps' not in st.session_state:
                         st.session_state.cleaning_steps = []
                     st.session_state.cleaning_steps = current_steps + [cleaning_step]
+
+                    # Save session after operation
+                    save_session(
+                        conn,
+                        st.session_state.session_id,
+                        st.session_state.df,
+                        st.session_state.cleaning_steps
+                    )
                     st.success(f"Converted '{conversion_col}' to {target_type}")
                 except Exception as e:
                     st.error(f"Error converting data type: {str(e)}")
@@ -612,6 +682,14 @@ def main():
                         if 'cleaning_steps' not in st.session_state:
                             st.session_state.cleaning_steps = []
                         st.session_state.cleaning_steps = current_steps + [cleaning_step]
+
+                        # Save session after operation
+                        save_session(
+                            conn,
+                            st.session_state.session_id,
+                            st.session_state.df,
+                            st.session_state.cleaning_steps
+                        )
                         st.success(f"Group by applied successfully on {', '.join(group_cols)} with {agg_func}")
                     except Exception as e:
                         st.error(f"Error in group by operation: {str(e)}")
@@ -651,6 +729,14 @@ def main():
                 if 'cleaning_steps' not in st.session_state:
                     st.session_state.cleaning_steps = []
                 st.session_state.cleaning_steps = current_steps + [cleaning_step]
+
+                # Save session after each operation
+                save_session(
+                    conn,
+                    st.session_state.session_id,
+                    st.session_state.df,
+                    st.session_state.cleaning_steps
+                )
                 st.success(f"Filter applied successfully: {filter_query}")
             elif is_valid:
                 st.warning("Filter resulted in empty DataFrame")
@@ -681,6 +767,14 @@ def main():
                     'columns': selected_cols
                 }
                 st.session_state.cleaning_steps = current_steps + [viz_step]
+
+                # Save session after visualization
+                save_session(
+                    conn,
+                    st.session_state.session_id,
+                    st.session_state.df,
+                    st.session_state.cleaning_steps
+                )
         else:
             # Color scheme selection
             color_scheme = st.selectbox('Select Color Scheme', COLOR_SCHEMES)
@@ -789,18 +883,6 @@ def main():
                 code = export_cleaning_code(st.session_state.cleaning_steps)
                 st.code(code, language="python")
 
-        # Save session and show debug info
-        # st.write("Debug: Final state before saving:", {
-        #     "has_df": st.session_state.df is not None,
-        #     "cleaning_steps_count": len(st.session_state.cleaning_steps),
-        #     "cleaning_steps": st.session_state.cleaning_steps
-        # })
-        save_session(
-            conn,
-            st.session_state.session_id,
-            st.session_state.df,
-            st.session_state.cleaning_steps
-        )
 
     # Close database connection
     conn.close()
